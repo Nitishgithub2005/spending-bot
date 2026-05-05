@@ -2,9 +2,47 @@ const Expense = require('../models/Expense');
 const { extractExpenses } = require('../lib/llm');
 const { validateExpenses } = require('../lib/validate');
 const { formatExpenseList } = require('../lib/format');
-const { getISTDateKey } = require('../lib/dateUtils');
+const { getISTDateKey, getISTMonthRange } = require('../lib/dateUtils');
 const Budget = require('../models/Budget');
-const { getISTMonthRange } = require('../lib/dateUtils');
+
+function parseDatePrefix(text) {
+  const yesterday = /^yesterday[:\-\s]+/i;
+  const fullDate  = /^(\d{4}-\d{2}-\d{2})[:\-\s]+/;
+  const shortDate = /^(\d{2}\/\d{2})[:\-\s]+/;
+
+  if (yesterday.test(text)) {
+    const d = new Date();
+    d.setDate(d.getDate() - 1);
+    return {
+      dateKey: getISTDateKey(d),
+      cleanText: text.replace(yesterday, '').trim()
+    };
+  }
+
+  if (fullDate.test(text)) {
+    const match = text.match(fullDate);
+    return {
+      dateKey: match[1],
+      cleanText: text.replace(fullDate, '').trim()
+    };
+  }
+
+  if (shortDate.test(text)) {
+    const match = text.match(shortDate);
+    const [dd, mm] = match[1].split('/');
+    const year = new Date().getFullYear();
+    return {
+      dateKey: `${year}-${mm.padStart(2, '0')}-${dd.padStart(2, '0')}`,
+      cleanText: text.replace(shortDate, '').trim()
+    };
+  }
+
+  return {
+    dateKey: getISTDateKey(),
+    cleanText: text
+  };
+}
+
 async function handleMessage(bot, msg) {
   const chatId = msg.chat.id;
   const userId = msg.from.id;
@@ -14,9 +52,12 @@ async function handleMessage(bot, msg) {
   // Skip commands
   if (text.startsWith('/')) return;
 
+  // Parse date prefix FIRST before passing to LLM
+  const { dateKey, cleanText } = parseDatePrefix(text);
+
   let parsed;
   try {
-    parsed = await extractExpenses(text);
+    parsed = await extractExpenses(cleanText);
   } catch (err) {
     console.error('LLM error:', err);
     return bot.sendMessage(chatId, '⚠️ LLM unavailable. Try again shortly.');
@@ -33,9 +74,6 @@ async function handleMessage(bot, msg) {
     return bot.sendMessage(chatId, "No valid expenses found. Include amounts (e.g., 'chai 10')");
   }
 
-  const dateKey = getISTDateKey();
-
-  // Bulk insert — simple, no duplicate prevention beyond same-message
   const docs = valid.map(e => ({
     userId,
     username,
@@ -46,31 +84,32 @@ async function handleMessage(bot, msg) {
   }));
 
   await Expense.insertMany(docs);
-  // Check budget alerts after saving
-const { start, end } = getISTMonthRange();
-const budgets = await Budget.find({ userId });
 
-if (budgets.length) {
-  const spending = await Expense.aggregate([
-    { $match: { userId, date: { $gte: start, $lt: end } } },
-    { $group: { _id: '$category', total: { $sum: '$amount' } } }
-  ]);
-  const spendMap = Object.fromEntries(spending.map(s => [s._id, s.total]));
+  // Budget alerts
+  const { start, end } = getISTMonthRange();
+  const budgets = await Budget.find({ userId });
 
-  const alerts = [];
-  for (const b of budgets) {
-    const spent = spendMap[b.category] || 0;
-    const pct   = (spent / b.limit) * 100;
-    if (pct >= 100) alerts.push(`🔴 ${b.category} budget EXCEEDED! ₹${spent}/₹${b.limit}`);
-    else if (pct >= 80) alerts.push(`🟡 ${b.category} at ${pct.toFixed(0)}% of budget (₹${spent}/₹${b.limit})`);
+  if (budgets.length) {
+    const spending = await Expense.aggregate([
+      { $match: { userId, date: { $gte: start, $lt: end } } },
+      { $group: { _id: '$category', total: { $sum: '$amount' } } }
+    ]);
+    const spendMap = Object.fromEntries(spending.map(s => [s._id, s.total]));
+
+    const alerts = [];
+    for (const b of budgets) {
+      const spent = spendMap[b.category] || 0;
+      const pct   = (spent / b.limit) * 100;
+      if (pct >= 100) alerts.push(`🔴 ${b.category} budget EXCEEDED! ₹${spent}/₹${b.limit}`);
+      else if (pct >= 80) alerts.push(`🟡 ${b.category} at ${pct.toFixed(0)}% of budget (₹${spent}/₹${b.limit})`);
+    }
+
+    if (alerts.length) {
+      bot.sendMessage(chatId, '⚠️ Budget Alert:\n' + alerts.join('\n'));
+    }
   }
 
-  if (alerts.length) {
-    bot.sendMessage(chatId, '⚠️ Budget Alert:\n' + alerts.join('\n'));
-  }
-}
-
-  let reply = formatExpenseList(valid);
+  let reply = formatExpenseList(valid, `Added for ${dateKey}:`);
   if (skipped > 0) {
     reply += `\n\n⚠️ ${skipped} item(s) skipped (missing/invalid amount).`;
   }
