@@ -11,11 +11,10 @@
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
-    "chart.js": "^4.5.1",
-    "chartjs-node-canvas": "^5.0.0",
     "dotenv": "^17.4.0",
     "groq-sdk": "^1.1.2",
     "mongoose": "^9.6.1",
-    "node-telegram-bot-api": "^0.67.0"
+    "node-telegram-bot-api": "^0.67.0",
+    "quickchart-js": "^3.1.3"
   }
 }
