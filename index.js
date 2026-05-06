@@ -4,6 +4,7 @@ const { connectDB } = require('./db');
 const { handleMessage } = require('./handlers/message');
 // update the import line at the top
 const { handleToday, handleMonth, handleSummary, handleHelp } = require('./handlers/commands');
+const { handleBroadcast, handleStats, handleAnnounce } = require('./handlers/admin');
 
 
 const {
@@ -34,6 +35,9 @@ async function main() {
   bot.onText(/\/chartweek/,     (msg) => handleChartWeek(bot, msg));
   // inside main(), add:
 bot.onText(/\/help/, (msg) => handleHelp(bot, msg));
+bot.onText(/\/broadcast/, (msg) => handleBroadcast(bot, msg));
+bot.onText(/\/stats/,     (msg) => handleStats(bot, msg));
+bot.onText(/\/announce/,  (msg) => handleAnnounce(bot, msg));
 
   // Natural language messages
   bot.on('message', (msg) => handleMessage(bot, msg));

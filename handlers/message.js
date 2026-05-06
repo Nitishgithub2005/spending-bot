@@ -4,6 +4,7 @@ const { validateExpenses } = require('../lib/validate');
 const { formatExpenseList } = require('../lib/format');
 const { getISTDateKey, getISTMonthRange } = require('../lib/dateUtils');
 const Budget = require('../models/Budget');
+const User = require('../models/User');
 
 function parseDatePrefix(text) {
   const yesterday = /^yesterday[:\-\s]+/i;
@@ -44,13 +45,20 @@ function parseDatePrefix(text) {
 }
 
 async function handleMessage(bot, msg) {
-  const chatId = msg.chat.id;
-  const userId = msg.from.id;
+  const chatId   = msg.chat.id;
+  const userId   = msg.from.id;
   const username = msg.from.username || msg.from.first_name;
-  const text = msg.text;
+  const text     = msg.text;
 
-  // Skip commands
+  // Skip commands — register happens in index.js via bot.on('message') which fires for all
   if (text.startsWith('/')) return;
+
+  // Register user silently (upsert — safe to call every time)
+  await User.findOneAndUpdate(
+    { userId },
+    { chatId, username, firstName: msg.from.first_name },
+    { upsert: true }
+  ).catch(err => console.error('User upsert error:', err));
 
   // Parse date prefix FIRST before passing to LLM
   const { dateKey, cleanText } = parseDatePrefix(text);
@@ -67,7 +75,7 @@ async function handleMessage(bot, msg) {
     return bot.sendMessage(chatId, "Couldn't parse that. Try: 'chai 10 auto 50'");
   }
 
-  const valid = validateExpenses(parsed);
+  const valid   = validateExpenses(parsed);
   const skipped = parsed.length - valid.length;
 
   if (valid.length === 0) {
